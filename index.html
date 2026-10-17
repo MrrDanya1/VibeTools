@@ -27,7 +27,7 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
     <div class="drop" id="drop">
       <span class="upload-icon">📷</span>
       <strong id="dropTitle">Сначала выбери фото</strong>
-      <span class="hint">PNG, JPG, WEBP · лучше работает с чётким текстом</span>
+      <span class="hint">PNG, JPG, WEBP · лучше результат на ровном, контрастном тексте</span>
       <img class="preview" id="preview" alt="Предпросмотр выбранного изображения">
     </div>
     <label for="file">Выбрать изображение на устройстве</label>
@@ -55,7 +55,7 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
       <button class="secondary" id="save">Скачать .txt</button>
       <button class="secondary" id="clear">Очистить</button>
     </div>
-    <p class="small">Для первого запуска нужен интернет — загружаются языковые данные. После этого движок сохраняется для следующих фото, поэтому повторное распознавание быстрее. Качество зависит от резкости, освещения и наклона фотографии.</p>
+    <p class="small">Для первого запуска нужен интернет — загружаются языковые данные. После этого движок сохраняется для следующих фото, поэтому повторное распознавание быстрее. Для лучшего результата снимай страницу ровно, без теней, чтобы текст занимал большую часть кадра.</p>
   </section>
   <footer>VibeTools · простой инструмент для учёбы и повседневных задач</footer>
 </main>
@@ -89,20 +89,33 @@ async function recognizeFile(file){
      workerLang=lang;
    }
    if(thisJob!==job)return;
-   // Уменьшаем слишком большие фото, чтобы ускорить распознавание на телефоне.
+   // Подготовка изображения: увеличиваем мелкий текст, переводим в оттенки серого
+   // и усиливаем контраст. Ограничиваем размер, чтобы обработка не перегружала телефон.
    let imageForOCR=file;
    if('createImageBitmap' in window){
      const bitmap=await createImageBitmap(file);
-     const maxSide=1800,scale=Math.min(1,maxSide/Math.max(bitmap.width,bitmap.height));
-     if(scale<1){
-       const canvas=document.createElement('canvas');
-       canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
-       const ctx=canvas.getContext('2d',{alpha:false});
-       ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
-       imageForOCR=canvas;
-     }
+     const sourceMax=Math.max(bitmap.width,bitmap.height);
+     const scale=Math.min(2,2400/sourceMax);
+     const canvas=document.createElement('canvas');
+     canvas.width=Math.max(1,Math.round(bitmap.width*scale));
+     canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+     const ctx=canvas.getContext('2d',{alpha:false});
+     ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+     ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
      bitmap.close();
+     const frame=ctx.getImageData(0,0,canvas.width,canvas.height);
+     const px=frame.data;
+     for(let i=0;i<px.length;i+=4){
+       const gray=0.299*px[i]+0.587*px[i+1]+0.114*px[i+2];
+       const enhanced=Math.max(0,Math.min(255,(gray-128)*1.35+128));
+       px[i]=px[i+1]=px[i+2]=enhanced;
+     }
+     ctx.putImageData(frame,0,0);
+     imageForOCR=canvas;
    }
+   if(thisJob!==job)return;
+   // Режим 6 подходит для обычных страниц с абзацами и учебных заданий.
+   await worker.setParameters({tessedit_pageseg_mode:'6',preserve_interword_spaces:'1'});
    if(thisJob!==job)return;
    const result=await worker.recognize(imageForOCR);
    if(thisJob!==job)return;
