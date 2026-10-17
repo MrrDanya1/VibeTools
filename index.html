@@ -21,7 +21,7 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
 <main>
   <div class="brand">VibeTools</div>
   <h1>Текст с фото —<br>в пару нажатий</h1>
-  <p class="sub">Загрузи фотографию или скриншот — распознавание текста запустится прямо в браузере. Можно скопировать результат или сохранить его в файл.</p>
+  <p class="sub">Выбери фотографию или скриншот — распознавание текста начнётся автоматически. Никакие AI API не используются.</p>
 
   <section class="panel">
     <div class="drop" id="drop">
@@ -41,9 +41,9 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
           <option value="eng">Английский</option>
         </select>
       </div>
-      <button class="primary" id="run" disabled>Распознать текст</button>
+      
     </div>
-    <div class="status" id="status" role="status">Нажми «Выбрать файл» выше.</div>
+    <div class="status" id="status" role="status">Выбери фото — распознавание начнётся автоматически.</div>
     <div class="progress"><div class="bar" id="bar"></div></div>
   </section>
 
@@ -61,50 +61,63 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
 </main>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const fileInput=document.getElementById('file'),drop=document.getElementById('drop'),preview=document.getElementById('preview'),dropTitle=document.getElementById('dropTitle'),runBtn=document.getElementById('run'),statusEl=document.getElementById('status'),bar=document.getElementById('bar'),output=document.getElementById('output'),count=document.getElementById('count');
-let selectedFile=null,busy=false;
+const fileInput=document.getElementById('file'),drop=document.getElementById('drop'),preview=document.getElementById('preview'),dropTitle=document.getElementById('dropTitle'),statusEl=document.getElementById('status'),bar=document.getElementById('bar'),output=document.getElementById('output'),count=document.getElementById('count'),language=document.getElementById('language');
+let selectedFile=null,busy=false,worker=null,job=0;
 function setStatus(text){statusEl.textContent=text}
 function setCount(){count.textContent=output.value.length.toLocaleString('ru-RU')+' символов'}
+async function recognizeFile(file){
+ const thisJob=++job;
+ if(!file)return;
+ selectedFile=file;busy=true;output.value='';setCount();bar.style.width='2%';
+ setStatus('Подготовка распознавания…');
+ try{
+   if(!window.Tesseract)throw new Error('OCR engine did not load');
+   if(worker){try{await worker.terminate()}catch(e){}worker=null}
+   if(thisJob!==job)return;
+   const lang=language.value;
+   worker=await Tesseract.createWorker(lang,1,{logger:m=>{
+     if(thisJob!==job)return;
+     if(m.status){
+       const pct=typeof m.progress==='number'?Math.round(m.progress*100):0;
+       bar.style.width=Math.max(3,pct)+'%';
+       const label=m.status==='recognizing text'?'Распознаю текст… ':m.status==='loading language traineddata'?'Загружаю языковые данные… ':'Готовлю движок… ';
+       setStatus(label+(pct?pct+'%':''));
+     }
+   }});
+   if(thisJob!==job)return;
+   const result=await worker.recognize(file);
+   if(thisJob!==job)return;
+   output.value=(result.data.text||'').trim();setCount();bar.style.width='100%';
+   setStatus(output.value?'Готово! Текст распознан автоматически.':'Текст не найден. Попробуй более чёткое фото.');
+ }catch(err){
+   console.error(err);
+   if(thisJob===job)setStatus('Не удалось распознать текст. Проверь интернет и попробуй ещё раз выбрать фото.');
+ }finally{
+   if(thisJob===job)busy=false;
+ }
+}
 function selectFile(file){
- if(!file){setStatus('Файл не выбран. Попробуй выбрать фото ещё раз.');return}
- // На Android некоторые приложения выбора фото возвращают файл без MIME-типа.
- const looksLikeImage=/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file.name||'');
- if(file.type && !file.type.startsWith('image/') && !looksLikeImage){setStatus('Выбери файл изображения: JPG, PNG или WEBP.');return}
+ if(!file){setStatus('Файл не выбран. Попробуй ещё раз.');return}
+ const looksLikeImage=/\.(png|jpe?g|webp|gif|bmp|tiff?|heic|heif)$/i.test(file.name||'');
+ if(file.type&&!file.type.startsWith('image/')&&!looksLikeImage){setStatus('Выбери изображение JPG, PNG или WEBP.');return}
  selectedFile=file;
  if(preview.dataset.url)URL.revokeObjectURL(preview.dataset.url);
- const imageUrl=URL.createObjectURL(file);
- preview.dataset.url=imageUrl;
- preview.onload=()=>{preview.style.display='block';setStatus('Фото загружено. Нажми «Распознать текст».')};
- preview.onerror=()=>{preview.style.display='none';setStatus('Файл выбран, но браузер не смог открыть изображение. Попробуй JPG или PNG.');runBtn.disabled=true;selectedFile=null};
- preview.src=imageUrl;
- preview.style.display='block';
- dropTitle.textContent=file.name||'Фото выбрано';
- runBtn.disabled=false;bar.style.width='0%';
- setStatus('Файл выбран, загружаю предпросмотр…');
+ const imageUrl=URL.createObjectURL(file);preview.dataset.url=imageUrl;
+ preview.onload=()=>{preview.style.display='block';recognizeFile(file)};
+ preview.onerror=()=>{preview.style.display='none';selectedFile=null;setStatus('Не удалось открыть изображение. Попробуй JPG или PNG.')};
+ preview.src=imageUrl;preview.style.display='block';dropTitle.textContent=file.name||'Фото выбрано';
+ setStatus('Фото выбрано. Сейчас начнётся распознавание…');
 }
-fileInput.addEventListener('change',e=>{const file=e.target.files&&e.target.files[0];selectFile(file);});
-fileInput.addEventListener('input',e=>{const file=e.target.files&&e.target.files[0];if(file&&!selectedFile)selectFile(file);});
-
+fileInput.addEventListener('change',e=>selectFile(e.target.files&&e.target.files[0]));
+fileInput.addEventListener('input',e=>{const file=e.target.files&&e.target.files[0];if(file&&file!==selectedFile)selectFile(file)});
 for(const eventName of ['dragenter','dragover'])drop.addEventListener(eventName,e=>{e.preventDefault();drop.classList.add('drag')});
 for(const eventName of ['dragleave','drop'])drop.addEventListener(eventName,e=>{e.preventDefault();drop.classList.remove('drag')});
-drop.addEventListener('drop',e=>selectFile(e.dataTransfer.files[0]));
-runBtn.addEventListener('click',async()=>{if(!selectedFile||busy)return;if(!window.Tesseract){setStatus('Не удалось загрузить OCR-движок. Проверь интернет и обнови страницу.');return}
-busy=true;runBtn.disabled=true;bar.style.width='3%';output.value='';
-let worker;
-try{
- const lang=document.getElementById('language').value;
- setStatus('Загрузка движка распознавания…');
- worker=await Tesseract.createWorker(lang,1,{logger:m=>{if(m.status){const pct=typeof m.progress==='number'?Math.round(m.progress*100):0;bar.style.width=Math.max(3,pct)+'%';setStatus((m.status==='recognizing text'?'Распознавание текста… ':m.status==='loading language traineddata'?'Загрузка языковых данных… ':'Подготовка… ')+(pct?pct+'%':'');}}});
- const result=await worker.recognize(selectedFile);
- output.value=(result.data.text||'').trim();setCount();bar.style.width='100%';
- setStatus(output.value?'Готово! Проверь результат: некоторые символы могут распознаться неточно.':'Текст не найден. Попробуй более чёткое фото с хорошим освещением.');
-}catch(err){console.error(err);setStatus('Не получилось распознать фото. Проверь интернет, попробуй другое изображение или повтори попытку.')}
-finally{if(worker)try{await worker.terminate()}catch(e){}busy=false;runBtn.disabled=!selectedFile}
-});
+drop.addEventListener('drop',e=>{const file=e.dataTransfer.files&&e.dataTransfer.files[0];if(file)selectFile(file)});
+language.addEventListener('change',()=>{if(selectedFile)recognizeFile(selectedFile)});
 output.addEventListener('input',setCount);
-document.getElementById('copy').addEventListener('click',async()=>{if(!output.value){setStatus('Сначала распознай текст.');return}try{await navigator.clipboard.writeText(output.value);setStatus('Текст скопирован.')}catch(e){output.focus();output.select();try{document.execCommand('copy');setStatus('Текст скопирован.')}catch(_){setStatus('Не удалось скопировать автоматически — выдели текст вручную.')}}});
-document.getElementById('save').addEventListener('click',()=>{if(!output.value){setStatus('Нет текста для скачивания.');return}const blob=new Blob([output.value],{type:'text/plain;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='raspoznannyy-tekst.txt';a.click();URL.revokeObjectURL(url);setStatus('Файл подготовлен для скачивания.')});
-document.getElementById('clear').addEventListener('click',()=>{output.value='';setCount();selectedFile=null;fileInput.value='';if(preview.dataset.url)URL.revokeObjectURL(preview.dataset.url);delete preview.dataset.url;preview.removeAttribute('src');preview.style.display='none';dropTitle.textContent='Сначала выбери фото';runBtn.disabled=true;bar.style.width='0%';setStatus('Всё очищено. Выбери новое изображение.')});
+document.getElementById('copy').addEventListener('click',async()=>{if(!output.value){setStatus('Сначала дождись распознавания текста.');return}try{await navigator.clipboard.writeText(output.value);setStatus('Текст скопирован.')}catch(e){output.focus();output.select();try{document.execCommand('copy');setStatus('Текст скопирован.')}catch(_){setStatus('Не удалось скопировать автоматически — выдели текст вручную.')}}});
+document.getElementById('save').addEventListener('click',()=>{if(!output.value){setStatus('Пока нечего скачивать. Дождись распознавания.');return}const blob=new Blob([output.value],{type:'text/plain;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='raspoznannyy-tekst.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setStatus('Текст сохранён в файл.')});
+document.getElementById('clear').addEventListener('click',async()=>{job++;if(worker){try{await worker.terminate()}catch(e){}worker=null}selectedFile=null;fileInput.value='';output.value='';setCount();if(preview.dataset.url)URL.revokeObjectURL(preview.dataset.url);delete preview.dataset.url;preview.removeAttribute('src');preview.style.display='none';dropTitle.textContent='Сначала выбери фото';bar.style.width='0%';busy=false;setStatus('Всё очищено. Выбери новое изображение.')});
 </script>
 </body>
 </html>
