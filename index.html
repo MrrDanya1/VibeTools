@@ -55,7 +55,7 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
       <button class="secondary" id="save">Скачать .txt</button>
       <button class="secondary" id="clear">Очистить</button>
     </div>
-    <p class="small">Для первого запуска нужен интернет — загружаются языковые данные. После этого движок сохраняется для следующих фото, поэтому повторное распознавание быстрее. Сайт проверяет исходное фото и ещё два варианта обработки, затем выбирает результат с лучшей оценкой. Это может занять больше времени.</p>
+    <p class="small">Для первого запуска нужен интернет — загружаются языковые данные. После этого движок сохраняется для следующих фото, поэтому повторное распознавание быстрее. Сайт сравнивает исходное фото, оттенки серого, автоконтраст, адаптивный чёрно-белый и инвертированный варианты. Лучший результат выбирается автоматически; распознавание может занять дольше.</p>
   </section>
   <footer>VibeTools · простой инструмент для учёбы и повседневных задач</footer>
 </main>
@@ -89,12 +89,12 @@ async function recognizeFile(file){
      workerLang=lang;
    }
    if(thisJob!==job)return;
-   // Готовим несколько вариантов, но исходное изображение всегда проверяется первым.
-   // Сохраняем мелкие детали и не применяем сильное увеличение.
+   // Декодируем фото один раз. Если createImageBitmap недоступен, передаём файл напрямую.
+   let imageForOCR=file;
    let baseCanvas=null;
    if('createImageBitmap' in window){
      const bitmap=await createImageBitmap(file);
-     const scale=Math.min(1,2200/Math.max(bitmap.width,bitmap.height));
+     const scale=Math.min(1,2400/Math.max(bitmap.width,bitmap.height));
      baseCanvas=document.createElement('canvas');
      baseCanvas.width=Math.max(1,Math.round(bitmap.width*scale));
      baseCanvas.height=Math.max(1,Math.round(bitmap.height*scale));
@@ -105,48 +105,86 @@ async function recognizeFile(file){
      imageForOCR=baseCanvas;
    }
    if(thisJob!==job)return;
-   const variants=[{image:imageForOCR,label:'исходное фото',psm:'3'}];
+
+   // Собираем несколько разумных вариантов. Исходное фото всегда остаётся первым.
+   const variants=[{image:imageForOCR,label:'оригинал',psm:'3'}];
    if(baseCanvas){
-     const gray=document.createElement('canvas');
-     gray.width=baseCanvas.width;gray.height=baseCanvas.height;
-     const gctx=gray.getContext('2d',{alpha:false});
+     const w=baseCanvas.width,h=baseCanvas.height;
+     const makeCanvas=()=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c};
+     const gray=makeCanvas(),gctx=gray.getContext('2d',{willReadFrequently:true});
      gctx.drawImage(baseCanvas,0,0);
-     const pixels=gctx.getImageData(0,0,gray.width,gray.height),data=pixels.data;
-     for(let i=0;i<data.length;i+=4){
-       const v=Math.round(.299*data[i]+.587*data[i+1]+.114*data[i+2]);
-       data[i]=data[i+1]=data[i+2]=v;
+     const frame=gctx.getImageData(0,0,w,h),src=frame.data;
+     const lum=new Uint8Array(w*h);
+     for(let p=0,j=0;p<src.length;p+=4,j++){
+       const v=Math.round(.299*src[p]+.587*src[p+1]+.114*src[p+2]);
+       lum[j]=v;src[p]=src[p+1]=src[p+2]=v;
      }
-     gctx.putImageData(pixels,0,0);
-     variants.push({image:gray,label:'чёрно-белый вариант',psm:'6'});
-     // Пороговая версия полезна для бледного текста, но не заменяет оригинал.
-     const bw=document.createElement('canvas');
-     bw.width=gray.width;bw.height=gray.height;
-     const bctx=bw.getContext('2d',{alpha:false});
-     bctx.drawImage(gray,0,0);
-     const bp=bctx.getImageData(0,0,bw.width,bw.height),bd=bp.data;
-     for(let i=0;i<bd.length;i+=4){
-       const v=bd[i]>175?255:0;
-       bd[i]=bd[i+1]=bd[i+2]=v;
+     gctx.putImageData(frame,0,0);
+     variants.push({image:gray,label:'оттенки серого',psm:'6'});
+
+     // Автоконтраст: растягиваем тоновый диапазон без ручного усиления резкости.
+     let min=255,max=0;
+     for(let i=0;i<lum.length;i++){if(lum[i]<min)min=lum[i];if(lum[i]>max)max=lum[i]}
+     if(max-min>24){
+       const contrast=makeCanvas(),cctx=contrast.getContext('2d',{willReadFrequently:true});
+       const cf=cctx.createImageData(w,h),cd=cf.data,range=max-min;
+       for(let i=0,j=0;i<lum.length;i++,j+=4){
+         const v=Math.max(0,Math.min(255,Math.round((lum[i]-min)*255/range)));
+         cd[j]=cd[j+1]=cd[j+2]=v;cd[j+3]=255;
+       }
+       cctx.putImageData(cf,0,0);
+       variants.push({image:contrast,label:'автоконтраст',psm:'6'});
      }
-     bctx.putImageData(bp,0,0);
-     variants.push({image:bw,label:'контрастный вариант',psm:'11'});
+
+     // Адаптивный порог лучше глобального, если свет на странице неравномерный.
+     // Используем локальную среднюю яркость в небольшом окне.
+     const integral=new Float64Array((w+1)*(h+1));
+     for(let y=1;y<=h;y++){
+       let row=0;
+       for(let x=1;x<=w;x++){
+         row+=lum[(y-1)*w+x-1];
+         integral[y*(w+1)+x]=integral[(y-1)*(w+1)+x]+row;
+       }
+     }
+     const adaptive=makeCanvas(),actx=adaptive.getContext('2d');
+     const af=actx.createImageData(w,h),ad=af.data,rad=Math.max(8,Math.round(Math.min(w,h)*.012));
+     for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+       const x1=Math.max(0,x-rad),y1=Math.max(0,y-rad),x2=Math.min(w-1,x+rad),y2=Math.min(h-1,y+rad);
+       const A=integral[y1*(w+1)+x1],B=integral[y1*(w+1)+x2+1],C=integral[(y2+1)*(w+1)+x1],D=integral[(y2+1)*(w+1)+x2+1];
+       const avg=(D-B-C+A)/((x2-x1+1)*(y2-y1+1));
+       const v=lum[y*w+x]>(avg-9)?255:0,idx=(y*w+x)*4;
+       ad[idx]=ad[idx+1]=ad[idx+2]=v;ad[idx+3]=255;
+     }
+     actx.putImageData(af,0,0);
+     variants.push({image:adaptive,label:'адаптивный чёрно-белый',psm:'11'});
+
+     // Инверсия может помочь на фото с белыми буквами на тёмном фоне.
+     const invert=makeCanvas(),ictx=invert.getContext('2d');
+     const inf=ictx.createImageData(w,h),id=inf.data;
+     for(let i=0,j=0;i<lum.length;i++,j+=4){const v=255-lum[i];id[j]=id[j+1]=id[j+2]=v;id[j+3]=255}
+     ictx.putImageData(inf,0,0);
+     variants.push({image:invert,label:'инвертированный',psm:'11'});
    }
+
    let best=null;
    for(let i=0;i<variants.length;i++){
      if(thisJob!==job)return;
      const variant=variants[i];
-     setStatus('Проверяю вариант '+(i+1)+' из '+variants.length+': '+variant.label+'…');
-     bar.style.width=Math.round(5+i/variants.length*85)+'%';
-     await worker.setParameters({tessedit_pageseg_mode:variant.psm});
+     setStatus('Проверка '+(i+1)+'/'+variants.length+': '+variant.label+'…');
+     bar.style.width=Math.round(5+(i/variants.length)*88)+'%';
+     await worker.setParameters({tessedit_pageseg_mode:variant.psm,preserve_interword_spaces:'1'});
      const candidate=await worker.recognize(variant.image);
      if(thisJob!==job)return;
      const textValue=(candidate.data.text||'').trim();
      const confidence=Number(candidate.data.confidence)||0;
-     // Предпочитаем уверенное распознавание, слегка штрафуем пустые/очень короткие результаты.
-     const score=confidence+(textValue.length>8?3:0)+(textValue.split(/\s+/).length>2?2:0);
+     const letters=(textValue.match(/[A-Za-zА-Яа-яЁё]/g)||[]).length;
+     const replacementChars=(textValue.match(/[�□]/g)||[]).length;
+     const words=(textValue.match(/[A-Za-zА-Яа-яЁё0-9]+/g)||[]).length;
+     const lengthBonus=Math.min(5,Math.log2(textValue.length+1));
+     const qualityPenalty=replacementChars*8+(textValue.length>10?Math.max(0,letters/textValue.length<.25?8:0):0);
+     const score=confidence+lengthBonus+Math.min(4,words/3)-qualityPenalty;
      if(textValue&&(!best||score>best.score))best={text:textValue,score,confidence,label:variant.label};
    }
-   if(thisJob!==job)return;
    const result={data:{text:best?best.text:'',confidence:best?best.confidence:0}};
    if(thisJob!==job)return;
    output.value=(result.data.text||'').trim();setCount();bar.style.width='100%';
