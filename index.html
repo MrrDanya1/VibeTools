@@ -193,8 +193,8 @@ async function recognizeFile(file){
      const replacementChars=(textValue.match(/[�□]/g)||[]).length;
      const words=(textValue.match(/[A-Za-zА-Яа-яЁё0-9]+/g)||[]).length;
      const lengthBonus=Math.min(8,Math.log2(textValue.length+1));
-     const lineCount=textValue.split(/\\n+/).filter(line=>line.trim()).length;
-     const numericInfo=(textValue.match(/\\d+/g)||[]).length;
+     const lineCount=textValue.split(/\n+/).filter(line=>line.trim()).length;
+     const numericInfo=(textValue.match(/\d+/g)||[]).length;
      const usefulLabels=(textValue.match(/точное время|здравствуйте|сегодняшняя дата|день недели|текущее время|время в игре|мин|час|суббота|понедельник|вторник|среда|четверг|пятница|воскресенье/gi)||[]).length;
      const qualityPenalty=replacementChars*8+(textValue.length>10?Math.max(0,letters/textValue.length<.25?8:0):0);
      const score=confidence+lengthBonus+Math.min(5,words/2)+Math.min(5,lineCount*.65)+Math.min(5,numericInfo*1.2)+Math.min(8,usefulLabels*1.5)-qualityPenalty;
@@ -227,8 +227,8 @@ async function recognizeFile(file){
        const confidence=Number(candidate.data.confidence)||0;
        const letters=(textValue.match(/[A-Za-zА-Яа-яЁё]/g)||[]).length;
        const words=(textValue.match(/[A-Za-zА-Яа-яЁё0-9]+/g)||[]).length;
-       const lineCount=textValue.split(/\\n+/).filter(line=>line.trim()).length;
-       const numericInfo=(textValue.match(/\\d+/g)||[]).length;
+       const lineCount=textValue.split(/\n+/).filter(line=>line.trim()).length;
+       const numericInfo=(textValue.match(/\d+/g)||[]).length;
        const usefulLabels=(textValue.match(/точное время|здравствуйте|сегодняшняя дата|день недели|текущее время|время в игре|мин|час|суббота|понедельник|вторник|среда|четверг|пятница|воскресенье/gi)||[]).length;
        const score=confidence+Math.min(8,Math.log2(textValue.length+1))+Math.min(4,words/2)+Math.min(5,lineCount*.65)+Math.min(5,numericInfo*1.2)+Math.min(8,usefulLabels*1.5)+(letters>0?2:0);
        if(textValue&&(!best||score>best.score))best={text:textValue,score,confidence,label:channel.label};
