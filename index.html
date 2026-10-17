@@ -36,8 +36,8 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
       <div class="field">
         <label for="language">Язык текста на фото</label>
         <select id="language">
+          <option value="rus">Русский — быстрее</option>
           <option value="rus+eng">Русский + английский</option>
-          <option value="rus">Русский</option>
           <option value="eng">Английский</option>
         </select>
       </div>
@@ -55,37 +55,56 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
       <button class="secondary" id="save">Скачать .txt</button>
       <button class="secondary" id="clear">Очистить</button>
     </div>
-    <p class="small">Для работы нужен интернет: при первом запуске загружается OCR-движок и языковые данные. Качество зависит от резкости, освещения и наклона фотографии.</p>
+    <p class="small">Для первого запуска нужен интернет — загружаются языковые данные. После этого движок сохраняется для следующих фото, поэтому повторное распознавание быстрее. Качество зависит от резкости, освещения и наклона фотографии.</p>
   </section>
   <footer>VibeTools · простой инструмент для учёбы и повседневных задач</footer>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 const fileInput=document.getElementById('file'),drop=document.getElementById('drop'),preview=document.getElementById('preview'),dropTitle=document.getElementById('dropTitle'),statusEl=document.getElementById('status'),bar=document.getElementById('bar'),output=document.getElementById('output'),count=document.getElementById('count'),language=document.getElementById('language');
-let selectedFile=null,busy=false,worker=null,job=0;
+let selectedFile=null,busy=false,worker=null,workerLang="",job=0;
 function setStatus(text){statusEl.textContent=text}
 function setCount(){count.textContent=output.value.length.toLocaleString('ru-RU')+' символов'}
 async function recognizeFile(file){
  const thisJob=++job;
  if(!file)return;
  selectedFile=file;busy=true;output.value='';setCount();bar.style.width='2%';
- setStatus('Подготовка распознавания…');
+ setStatus('Подготовка фото…');
  try{
    if(!window.Tesseract)throw new Error('OCR engine did not load');
-   if(worker){try{await worker.terminate()}catch(e){}worker=null}
-   if(thisJob!==job)return;
    const lang=language.value;
-   worker=await Tesseract.createWorker(lang,1,{logger:m=>{
-     if(thisJob!==job)return;
-     if(m.status){
-       const pct=typeof m.progress==='number'?Math.round(m.progress*100):0;
-       bar.style.width=Math.max(3,pct)+'%';
-       const label=m.status==='recognizing text'?'Распознаю текст… ':m.status==='loading language traineddata'?'Загружаю языковые данные… ':'Готовлю движок… ';
-       setStatus(label+(pct?pct+'%':''));
-     }
-   }});
+   if(worker && workerLang!==lang){try{await worker.terminate()}catch(e){}worker=null;workerLang=""}
    if(thisJob!==job)return;
-   const result=await worker.recognize(file);
+   if(!worker){
+     setStatus('Первый запуск: загружаю языковые данные…');
+     worker=await Tesseract.createWorker(lang,1,{logger:m=>{
+       if(thisJob!==job)return;
+       if(m.status){
+         const pct=typeof m.progress==='number'?Math.round(m.progress*100):0;
+         bar.style.width=Math.max(3,pct)+'%';
+         const label=m.status==='recognizing text'?'Распознаю текст… ':m.status==='loading language traineddata'?'Загружаю язык… ':'Готовлю распознавание… ';
+         setStatus(label+(pct?pct+'%':''));
+       }
+     }});
+     workerLang=lang;
+   }
+   if(thisJob!==job)return;
+   // Уменьшаем слишком большие фото, чтобы ускорить распознавание на телефоне.
+   let imageForOCR=file;
+   if('createImageBitmap' in window){
+     const bitmap=await createImageBitmap(file);
+     const maxSide=1800,scale=Math.min(1,maxSide/Math.max(bitmap.width,bitmap.height));
+     if(scale<1){
+       const canvas=document.createElement('canvas');
+       canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
+       const ctx=canvas.getContext('2d',{alpha:false});
+       ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
+       imageForOCR=canvas;
+     }
+     bitmap.close();
+   }
+   if(thisJob!==job)return;
+   const result=await worker.recognize(imageForOCR);
    if(thisJob!==job)return;
    output.value=(result.data.text||'').trim();setCount();bar.style.width='100%';
    setStatus(output.value?'Готово! Текст распознан автоматически.':'Текст не найден. Попробуй более чёткое фото.');
