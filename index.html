@@ -55,7 +55,7 @@ input[type=file]{display:block;position:static;width:100%;height:auto;opacity:1;
       <button class="secondary" id="save">Скачать .txt</button>
       <button class="secondary" id="clear">Очистить</button>
     </div>
-    <p class="small">Для первого запуска нужен интернет — загружаются языковые данные. После этого движок сохраняется для следующих фото, поэтому повторное распознавание быстрее. Сайт сравнивает исходное фото, оттенки серого, автоконтраст, адаптивный чёрно-белый и инвертированный варианты. Лучший результат выбирается автоматически; распознавание может занять дольше.</p>
+    <p class="small">Для первого запуска нужен интернет — загружаются языковые данные. После этого движок сохраняется для следующих фото, поэтому повторное распознавание быстрее. Сайт проверяет оригинал, несколько вариантов обработки и отдельно красный, зелёный и синий цветовые каналы — это помогает распознавать цветные буквы на тёмном фоне.</p>
   </section>
   <footer>VibeTools · простой инструмент для учёбы и повседневных задач</footer>
 </main>
@@ -184,6 +184,37 @@ async function recognizeFile(file){
      const qualityPenalty=replacementChars*8+(textValue.length>10?Math.max(0,letters/textValue.length<.25?8:0):0);
      const score=confidence+lengthBonus+Math.min(4,words/3)-qualityPenalty;
      if(textValue&&(!best||score>best.score))best={text:textValue,score,confidence,label:variant.label};
+   }
+   // Цветной текст может исчезать в сером изображении. Проверяем каждый RGB-канал отдельно:
+   // например, красный канал делает красные буквы светлыми даже на чёрном фоне.
+   if(baseCanvas){
+     const w=baseCanvas.width,h=baseCanvas.height;
+     const sourceCtx=baseCanvas.getContext('2d',{willReadFrequently:true});
+     const source=sourceCtx.getImageData(0,0,w,h).data;
+     const channelCanvas=document.createElement('canvas');
+     channelCanvas.width=w;channelCanvas.height=h;
+     const channelCtx=channelCanvas.getContext('2d');
+     const channelFrame=channelCtx.createImageData(w,h);
+     const channels=[{index:0,label:'красный канал'},{index:1,label:'зелёный канал'},{index:2,label:'синий канал'}];
+     for(const channel of channels){
+       if(thisJob!==job)return;
+       for(let p=0;p<source.length;p+=4){
+         const value=source[p+channel.index];
+         channelFrame.data[p]=channelFrame.data[p+1]=channelFrame.data[p+2]=value;
+         channelFrame.data[p+3]=255;
+       }
+       channelCtx.putImageData(channelFrame,0,0);
+       setStatus('Проверяю цветной текст: '+channel.label+'…');
+       await worker.setParameters({tessedit_pageseg_mode:'6',preserve_interword_spaces:'1'});
+       const candidate=await worker.recognize(channelCanvas);
+       if(thisJob!==job)return;
+       const textValue=(candidate.data.text||'').trim();
+       const confidence=Number(candidate.data.confidence)||0;
+       const letters=(textValue.match(/[A-Za-zА-Яа-яЁё]/g)||[]).length;
+       const words=(textValue.match(/[A-Za-zА-Яа-яЁё0-9]+/g)||[]).length;
+       const score=confidence+Math.min(5,Math.log2(textValue.length+1))+Math.min(4,words/3)+(letters>0?2:0);
+       if(textValue&&(!best||score>best.score))best={text:textValue,score,confidence,label:channel.label};
+     }
    }
    const result={data:{text:best?best.text:'',confidence:best?best.confidence:0}};
    if(thisJob!==job)return;
