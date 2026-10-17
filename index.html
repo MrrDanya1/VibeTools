@@ -122,6 +122,18 @@ async function recognizeFile(file){
      gctx.putImageData(frame,0,0);
      variants.push({image:gray,label:'оттенки серого',psm:'6'});
 
+     // Увеличенная копия помогает с мелким текстом в игровых окнах и скриншотах.
+     // Увеличиваем только один вариант, чтобы не перегружать телефон.
+     const enlarged=document.createElement('canvas');
+     enlarged.width=Math.min(3000,Math.round(w*1.6));
+     enlarged.height=Math.min(3000,Math.round(h*1.6));
+     const enlargedCtx=enlarged.getContext('2d');
+     enlargedCtx.imageSmoothingEnabled=true;
+     enlargedCtx.imageSmoothingQuality='high';
+     enlargedCtx.drawImage(baseCanvas,0,0,enlarged.width,enlarged.height);
+     variants.push({image:enlarged,label:'увеличенный оригинал',psm:'6'});
+     variants.push({image:enlarged,label:'увеличенный текст блоками',psm:'11'});
+
      // Автоконтраст: растягиваем тоновый диапазон без ручного усиления резкости.
      let min=255,max=0;
      for(let i=0;i<lum.length;i++){if(lum[i]<min)min=lum[i];if(lum[i]>max)max=lum[i]}
@@ -180,9 +192,12 @@ async function recognizeFile(file){
      const letters=(textValue.match(/[A-Za-zА-Яа-яЁё]/g)||[]).length;
      const replacementChars=(textValue.match(/[�□]/g)||[]).length;
      const words=(textValue.match(/[A-Za-zА-Яа-яЁё0-9]+/g)||[]).length;
-     const lengthBonus=Math.min(5,Math.log2(textValue.length+1));
+     const lengthBonus=Math.min(8,Math.log2(textValue.length+1));
+     const lineCount=textValue.split(/\\n+/).filter(line=>line.trim()).length;
+     const numericInfo=(textValue.match(/\\d+/g)||[]).length;
+     const usefulLabels=(textValue.match(/точное время|здравствуйте|сегодняшняя дата|день недели|текущее время|время в игре|мин|час|суббота|понедельник|вторник|среда|четверг|пятница|воскресенье/gi)||[]).length;
      const qualityPenalty=replacementChars*8+(textValue.length>10?Math.max(0,letters/textValue.length<.25?8:0):0);
-     const score=confidence+lengthBonus+Math.min(4,words/3)-qualityPenalty;
+     const score=confidence+lengthBonus+Math.min(5,words/2)+Math.min(5,lineCount*.65)+Math.min(5,numericInfo*1.2)+Math.min(8,usefulLabels*1.5)-qualityPenalty;
      if(textValue&&(!best||score>best.score))best={text:textValue,score,confidence,label:variant.label};
    }
    // Цветной текст может исчезать в сером изображении. Проверяем каждый RGB-канал отдельно:
@@ -212,7 +227,10 @@ async function recognizeFile(file){
        const confidence=Number(candidate.data.confidence)||0;
        const letters=(textValue.match(/[A-Za-zА-Яа-яЁё]/g)||[]).length;
        const words=(textValue.match(/[A-Za-zА-Яа-яЁё0-9]+/g)||[]).length;
-       const score=confidence+Math.min(5,Math.log2(textValue.length+1))+Math.min(4,words/3)+(letters>0?2:0);
+       const lineCount=textValue.split(/\\n+/).filter(line=>line.trim()).length;
+       const numericInfo=(textValue.match(/\\d+/g)||[]).length;
+       const usefulLabels=(textValue.match(/точное время|здравствуйте|сегодняшняя дата|день недели|текущее время|время в игре|мин|час|суббота|понедельник|вторник|среда|четверг|пятница|воскресенье/gi)||[]).length;
+       const score=confidence+Math.min(8,Math.log2(textValue.length+1))+Math.min(4,words/2)+Math.min(5,lineCount*.65)+Math.min(5,numericInfo*1.2)+Math.min(8,usefulLabels*1.5)+(letters>0?2:0);
        if(textValue&&(!best||score>best.score))best={text:textValue,score,confidence,label:channel.label};
      }
    }
