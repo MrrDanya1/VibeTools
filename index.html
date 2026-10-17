@@ -66,14 +66,24 @@ let selectedFile=null,busy=false;
 function setStatus(text){statusEl.textContent=text}
 function setCount(){count.textContent=output.value.length.toLocaleString('ru-RU')+' символов'}
 function selectFile(file){
- if(!file)return;
- if(!file.type.startsWith('image/')){setStatus('Это не изображение. Выбери фото в формате JPG, PNG или WEBP.');return}
+ if(!file){setStatus('Файл не выбран. Попробуй выбрать фото ещё раз.');return}
+ // На Android некоторые приложения выбора фото возвращают файл без MIME-типа.
+ const looksLikeImage=/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file.name||'');
+ if(file.type && !file.type.startsWith('image/') && !looksLikeImage){setStatus('Выбери файл изображения: JPG, PNG или WEBP.');return}
  selectedFile=file;
  if(preview.dataset.url)URL.revokeObjectURL(preview.dataset.url);
- const imageUrl=URL.createObjectURL(file);preview.dataset.url=imageUrl;preview.src=imageUrl;preview.style.display='block';
- dropTitle.textContent=file.name;runBtn.disabled=false;bar.style.width='0%';setStatus('Фото загружено. Нажми «Распознать текст».');
+ const imageUrl=URL.createObjectURL(file);
+ preview.dataset.url=imageUrl;
+ preview.onload=()=>{preview.style.display='block';setStatus('Фото загружено. Нажми «Распознать текст».')};
+ preview.onerror=()=>{preview.style.display='none';setStatus('Файл выбран, но браузер не смог открыть изображение. Попробуй JPG или PNG.');runBtn.disabled=true;selectedFile=null};
+ preview.src=imageUrl;
+ preview.style.display='block';
+ dropTitle.textContent=file.name||'Фото выбрано';
+ runBtn.disabled=false;bar.style.width='0%';
+ setStatus('Файл выбран, загружаю предпросмотр…');
 }
-fileInput.addEventListener('change',e=>{const file=e.target.files&&e.target.files[0];if(file)selectFile(file);});
+fileInput.addEventListener('change',e=>{const file=e.target.files&&e.target.files[0];selectFile(file);});
+fileInput.addEventListener('input',e=>{const file=e.target.files&&e.target.files[0];if(file&&!selectedFile)selectFile(file);});
 
 for(const eventName of ['dragenter','dragover'])drop.addEventListener(eventName,e=>{e.preventDefault();drop.classList.add('drag')});
 for(const eventName of ['dragleave','drop'])drop.addEventListener(eventName,e=>{e.preventDefault();drop.classList.remove('drag')});
