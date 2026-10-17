@@ -143,7 +143,7 @@ async function recognizeFile(file){
      const textValue=(candidate.data.text||'').trim();
      const confidence=Number(candidate.data.confidence)||0;
      // Предпочитаем уверенное распознавание, слегка штрафуем пустые/очень короткие результаты.
-     const score=confidence+(textValue.length>8?3:0)+(textValue.split(/\\s+/).length>2?2:0);
+     const score=confidence+(textValue.length>8?3:0)+(textValue.split(/\s+/).length>2?2:0);
      if(textValue&&(!best||score>best.score))best={text:textValue,score,confidence,label:variant.label};
    }
    if(thisJob!==job)return;
