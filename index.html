@@ -13,7 +13,7 @@ h1{font-size:clamp(29px,6vw,46px);line-height:1.1;letter-spacing:-.04em;margin:1
 .panel{background:rgba(14,36,26,.94);border:1px solid var(--line);border-radius:22px;padding:20px;margin-top:16px;box-shadow:0 14px 40px #0002}
 .drop{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:210px;padding:24px;border:2px dashed #38664b;border-radius:17px;background:#0a2016;cursor:pointer;transition:.2s}
 .drop:hover,.drop.drag{border-color:var(--green);background:#102b1c}.upload-icon{font-size:38px;margin-bottom:8px}.drop strong{font-size:18px}.hint{font-size:13px;color:var(--muted);margin-top:6px}
-input[type=file]{display:none}.controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:16px}.field{flex:1;min-width:170px}label{display:block;color:var(--muted);font-size:13px;margin:0 0 7px}select,textarea{width:100%;background:#091a12;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit}button{border:0;border-radius:12px;padding:12px 17px;font:inherit;font-weight:750;cursor:pointer;transition:transform .12s,opacity .12s}button:active{transform:scale(.98)}button:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--green);color:#062012}.secondary{background:#1b3828;color:var(--text);border:1px solid #315540}.buttons{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.status{margin-top:14px;color:var(--muted);font-size:14px;min-height:22px}.progress{height:7px;border-radius:99px;background:#20392a;overflow:hidden;margin-top:8px}.bar{height:100%;width:0;background:var(--green);transition:width .2s}.preview{display:none;width:100%;max-height:360px;object-fit:contain;margin-top:15px;border-radius:12px;background:#06130c}.result-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}.result-head h2{font-size:20px;margin:0}.result textarea{min-height:230px;resize:vertical;margin-top:12px}.small{font-size:12px;color:var(--muted);margin-top:14px}footer{text-align:center;color:#799383;font-size:12px;margin-top:24px}
+input[type=file]{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}.controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:16px}.field{flex:1;min-width:170px}label{display:block;color:var(--muted);font-size:13px;margin:0 0 7px}select,textarea{width:100%;background:#091a12;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit}button{border:0;border-radius:12px;padding:12px 17px;font:inherit;font-weight:750;cursor:pointer;transition:transform .12s,opacity .12s}button:active{transform:scale(.98)}button:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--green);color:#062012}.secondary{background:#1b3828;color:var(--text);border:1px solid #315540}.buttons{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.status{margin-top:14px;color:var(--muted);font-size:14px;min-height:22px}.progress{height:7px;border-radius:99px;background:#20392a;overflow:hidden;margin-top:8px}.bar{height:100%;width:0;background:var(--green);transition:width .2s}.preview{display:none;width:100%;max-height:360px;object-fit:contain;margin-top:15px;border-radius:12px;background:#06130c}.result-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}.result-head h2{font-size:20px;margin:0}.result textarea{min-height:230px;resize:vertical;margin-top:12px}.small{font-size:12px;color:var(--muted);margin-top:14px}footer{text-align:center;color:#799383;font-size:12px;margin-top:24px}
 @media(max-width:520px){main{padding:22px 12px 36px}.panel{padding:14px;border-radius:17px}.controls>*{min-width:100%}.buttons button{flex:1}.drop{min-height:180px}}
 </style>
 </head>
@@ -24,13 +24,13 @@ input[type=file]{display:none}.controls{display:flex;gap:12px;align-items:end;fl
   <p class="sub">Загрузи фотографию или скриншот — распознавание текста запустится прямо в браузере. Можно скопировать результат или сохранить его в файл.</p>
 
   <section class="panel">
-    <label class="drop" id="drop" for="file">
+    <div class="drop" id="drop" role="button" tabindex="0" aria-label="Выбрать фото">
       <span class="upload-icon">📷</span>
       <strong id="dropTitle">Выбери фото или перетащи его сюда</strong>
       <span class="hint">PNG, JPG, WEBP · лучше работает с чётким текстом</span>
       <img class="preview" id="preview" alt="Предпросмотр выбранного изображения">
-    </label>
-    <input id="file" type="file" accept="image/*">
+    </div>
+    <input id="file" type="file" accept="image/*" aria-label="Выбрать изображение">
     <div class="controls">
       <div class="field">
         <label for="language">Язык текста на фото</label>
@@ -64,8 +64,18 @@ const fileInput=document.getElementById('file'),drop=document.getElementById('dr
 let selectedFile=null,busy=false;
 function setStatus(text){statusEl.textContent=text}
 function setCount(){count.textContent=output.value.length.toLocaleString('ru-RU')+' символов'}
-function selectFile(file){if(!file)return;if(!file.type.startsWith('image/')){setStatus('Пожалуйста, выбери файл изображения.');return}selectedFile=file;preview.src=URL.createObjectURL(file);preview.style.display='block';dropTitle.textContent=file.name;runBtn.disabled=false;bar.style.width='0%';setStatus('Фото загружено. Нажми «Распознать текст».')}
-fileInput.addEventListener('change',e=>selectFile(e.target.files[0]));
+function selectFile(file){
+ if(!file)return;
+ if(!file.type.startsWith('image/')){setStatus('Это не изображение. Выбери фото в формате JPG, PNG или WEBP.');return}
+ selectedFile=file;
+ if(preview.dataset.url)URL.revokeObjectURL(preview.dataset.url);
+ const imageUrl=URL.createObjectURL(file);preview.dataset.url=imageUrl;preview.src=imageUrl;preview.style.display='block';
+ dropTitle.textContent=file.name;runBtn.disabled=false;bar.style.width='0%';setStatus('Фото загружено. Нажми «Распознать текст».');
+}
+drop.addEventListener('click',e=>{if(e.target===preview)return;fileInput.click()});
+drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fileInput.click()}});
+fileInput.addEventListener('change',e=>{const file=e.target.files&&e.target.files[0];if(file)selectFile(file);});
+
 for(const eventName of ['dragenter','dragover'])drop.addEventListener(eventName,e=>{e.preventDefault();drop.classList.add('drag')});
 for(const eventName of ['dragleave','drop'])drop.addEventListener(eventName,e=>{e.preventDefault();drop.classList.remove('drag')});
 drop.addEventListener('drop',e=>selectFile(e.dataTransfer.files[0]));
@@ -85,7 +95,7 @@ finally{if(worker)try{await worker.terminate()}catch(e){}busy=false;runBtn.disab
 output.addEventListener('input',setCount);
 document.getElementById('copy').addEventListener('click',async()=>{if(!output.value){setStatus('Сначала распознай текст.');return}try{await navigator.clipboard.writeText(output.value);setStatus('Текст скопирован.')}catch(e){output.focus();output.select();try{document.execCommand('copy');setStatus('Текст скопирован.')}catch(_){setStatus('Не удалось скопировать автоматически — выдели текст вручную.')}}});
 document.getElementById('save').addEventListener('click',()=>{if(!output.value){setStatus('Нет текста для скачивания.');return}const blob=new Blob([output.value],{type:'text/plain;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='raspoznannyy-tekst.txt';a.click();URL.revokeObjectURL(url);setStatus('Файл подготовлен для скачивания.')});
-document.getElementById('clear').addEventListener('click',()=>{output.value='';setCount();selectedFile=null;fileInput.value='';preview.removeAttribute('src');preview.style.display='none';dropTitle.textContent='Выбери фото или перетащи его сюда';runBtn.disabled=true;bar.style.width='0%';setStatus('Всё очищено. Выбери новое изображение.')});
+document.getElementById('clear').addEventListener('click',()=>{output.value='';setCount();selectedFile=null;fileInput.value='';if(preview.dataset.url)URL.revokeObjectURL(preview.dataset.url);delete preview.dataset.url;preview.removeAttribute('src');preview.style.display='none';dropTitle.textContent='Выбери фото или перетащи его сюда';runBtn.disabled=true;bar.style.width='0%';setStatus('Всё очищено. Выбери новое изображение.')});
 </script>
 </body>
 </html>
