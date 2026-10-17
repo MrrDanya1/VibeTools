@@ -94,7 +94,7 @@ async function recognizeFile(file){
    let baseCanvas=null;
    if('createImageBitmap' in window){
      const bitmap=await createImageBitmap(file);
-     const scale=Math.min(1,2400/Math.max(bitmap.width,bitmap.height));
+     const scale=Math.min(1,1800/Math.max(bitmap.width,bitmap.height));
      baseCanvas=document.createElement('canvas');
      baseCanvas.width=Math.max(1,Math.round(bitmap.width*scale));
      baseCanvas.height=Math.max(1,Math.round(bitmap.height*scale));
